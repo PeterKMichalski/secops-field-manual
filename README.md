@@ -1,7 +1,3 @@
-# secops-field-manual
-Python based desktop application designed as a personal knowledge base for security professionals.
-
-
 # SecOps Field Manual
 A Python based desktop application designed as a personal knowledge base for security professionals. It provides a fast and efficient way to store, organize, and retrieve technical notes, forensic artifacts, and operational procedures.
 
