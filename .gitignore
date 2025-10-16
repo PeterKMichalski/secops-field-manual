@@ -1,0 +1,26 @@
+Virtual Environment
+/ffm_venv/
+/venv/
+
+PyInstaller build artifacts
+/build/
+/dist/
+*.spec
+
+Python cache
+pycache/
+*.pyc
+
+Log files
+*.log
+
+User Data - Do not commit databases or user-generated assets
+*.db
+*_assets/
+
+macOS specific
+.DS_Store
+
+IDE specific
+.idea/
+.vscode/
