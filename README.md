@@ -6,19 +6,19 @@ A Python based desktop application designed as a personal knowledge base for sec
 # Key Features
 * Advanced Search: A powerful, unified search bar that supports:
 
-  * Implicit AND, explicit OR, and exclusion (-) operators.
+  * Implicit AND and exclusion (-) operators.
 
-  * Field-specific filters (e.g., tags:network, os:windows, title:"My Entry").
+  * Field-specific filters (e.g., `tags:network`, `os:windows`, `title:"My Entry"`).
 
   * Tab-autocompletion for search fields.
 
-  * Searching for entries with blank fields (e.g., path:blank).
+  * Searching for entries with blank fields (e.g., `artifact_value:blank`).
 
 * Rich Content & Linking:
 
   * Full Markdown support in "Description" and "Notes" fields, including tables, code blocks, and lists.
 
-  * Internal linking between entries using [[Entry Title]] syntax.
+  * Internal linking between entries using `[[Entry Title]]` syntax.
 
   * A dedicated "Resources" field that supports annotated external links with `[Display Text](url.com)` syntax.
 
