@@ -1,5 +1,5 @@
 # SecOps Field Manual
-A Python based desktop application designed as a personal knowledge base for security professionals. It provides a fast and efficient way to store, organize, and retrieve technical notes, forensic artifacts, and operational procedures.
+A Python based desktop application designed as a personal knowledge base for security professionals. It provides a fast and efficient way to store, organize, and retrieve technical notes, forensic artifacts, and operational procedures. This project was developed with AI assistance. 
 
 <img width="1920" height="1056" alt="Screenshot 2025-10-16 at 1 30 47 PM" src="https://github.com/user-attachments/assets/e9afee7c-4d76-4a24-a41c-0cae6d107842" />
 
@@ -60,7 +60,7 @@ To run the application from the source code, follow these steps.
 
 1. Clone the repository:
 ```   
-git clone [https://github.com/your-username/your-repo-name.git](https://github.com/your-username/your-repo-name.git)
+git clone https://github.com/PeterKMichalski/secops-field-manual.git
 cd your-repo-name
 ```
 2. Create and activate a virtual environment:
@@ -76,12 +76,41 @@ pip install -r requirements.txt
 ```
 python run.py
 ```
-# Building the Application
-This project uses PyInstaller to create a standalone application.
+# Building the Application (PyInstaller)
+PyInstaller was used to create a standalone application.
 
-1. Make sure you are in your activated virtual environment and have PyInstaller installed (pip install pyinstaller).
-
-2. Run the build command from the project's root directory:
+1. Generate the `.spec` file:
+From the project's root directory, run `pyi-makespec`.
 ```
-pyinstaller "Forensic Field Manual.spec" --clean
+pyi-makespec --windowed --name="SecOps Field Manual" run.py
+```
+2. Edit the `.spec` file:
+Open the generated `.spec` file and modify the `Analysis` section to include the icon, any hidden imports, and the possibly the runtime hook for macOS compatibility.
+```
+a = Analysis(
+    ['run.py'],
+    pathex=['.'],
+    binaries=[],
+    datas=[('path/to/your/field_manual_logo.png', '.')],
+    hiddenimports=['markdown'],
+    hookspath=[],
+    # A runtime_hook was used due to issues for macOS to find Qt plugins
+    runtime_hooks=['secops_field_manual/qt_runtime_hook.py'],
+    ...
+)
+
+...
+
+app = BUNDLE(
+    exe,
+    name='SecOps Field Manual.app',
+    icon='path/to/your/field_manual_logo.png',
+    bundle_identifier=None,
+)
+```
+
+3. Build the Application:
+Once the .spec file is configured, run the pyinstaller command.
+```
+pyinstaller "SecOps Field Manual.spec" --clean
 ```
