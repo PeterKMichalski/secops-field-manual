@@ -24,7 +24,7 @@ A Python based desktop application designed as a personal knowledge base for sec
 
   * Internal linking between entries using [[Entry Title]] syntax.
 
-  * A dedicated "Resources" field that supports annotated external links with [Display Text](url.com) syntax.
+  * A dedicated "Resources" field that supports annotated external links with `[Display Text](url.com)` syntax.
 
 * Structured Data:
 
