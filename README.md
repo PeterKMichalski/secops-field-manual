@@ -5,7 +5,7 @@ Python based desktop application designed as a personal knowledge base for secur
 # SecOps Field Manual
 A Python based desktop application designed as a personal knowledge base for security professionals. It provides a fast and efficient way to store, organize, and retrieve technical notes, forensic artifacts, and operational procedures.
 
-(Recommendation: Replace this link with a URL to one of the screenshots you've shared, like the final UI layout.)
+<img width="1920" height="1056" alt="Screenshot 2025-10-16 at 1 30 47 PM" src="https://github.com/user-attachments/assets/e9afee7c-4d76-4a24-a41c-0cae6d107842" />
 
 # Key Features
 * Advanced Search: A powerful, unified search bar that supports:
@@ -73,7 +73,6 @@ python3 -m venv venv
 source venv/bin/activate
 ```
 3. Install dependencies:
-(Recommendation: Create a requirements.txt file by running pip freeze > requirements.txt in your activated environment).
 ```
 pip install -r requirements.txt
 ```
