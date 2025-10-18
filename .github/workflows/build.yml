@@ -24,7 +24,7 @@ jobs:
         pip install pyinstaller
 
     - name: Build with PyInstaller
-      run: pyinstaller "Forensic Field Manual.spec" --clean
+      run: pyinstaller "app.spec" --clean
 
     - name: Upload macOS Artifact
       uses: actions/upload-artifact@v3
@@ -51,7 +51,7 @@ jobs:
         pip install pyinstaller
 
     - name: Build with PyInstaller
-      run: pyinstaller "Forensic Field Manual.spec" --clean
+      run: pyinstaller "app.spec" --clean
 
     - name: Upload Windows Artifact
       uses: actions/upload-artifact@v3
