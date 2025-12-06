@@ -1,7 +1,7 @@
 # SecOps Field Manual
 A Python based desktop application designed as a personal knowledge base for security professionals. It provides a fast and efficient way to store, organize, and retrieve technical notes, forensic artifacts, and operational procedures. This project was developed with AI assistance. 
 
-<img width="1920" height="1056" alt="Screenshot 2025-10-16 at 1 30 47 PM" src="https://github.com/user-attachments/assets/e9afee7c-4d76-4a24-a41c-0cae6d107842" />
+<img width="1205" height="833" alt="Secops Field Manual Preview" src="https://github.com/user-attachments/assets/729cae0f-2ca8-4008-8aba-dcdd0041f73e" />
 
 # Key Features
 * Advanced Search: A powerful, unified search bar that supports:
