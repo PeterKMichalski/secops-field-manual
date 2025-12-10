@@ -6,6 +6,7 @@ import urllib.parse
 import traceback
 import csv
 import markdown
+from pygments.formatters import HtmlFormatter
 from PySide6.QtWidgets import (
     QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
     QPushButton, QListWidget, QTextEdit, QLabel, QLineEdit,
@@ -13,7 +14,7 @@ from PySide6.QtWidgets import (
     QSpacerItem, QFileDialog, QSizePolicy, QScrollArea, QToolBar, QGroupBox,
     QApplication, QStyle, QInputDialog
 )
-from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QPixmap, QDesktopServices, QAction, QIcon, QFontMetrics, QFont
+from PySide6.QtGui import QTextCursor, QTextCharFormat, QColor, QPixmap, QDesktopServices, QAction, QIcon, QFontMetrics, QFont, QPalette
 from PySide6.QtCore import Qt, QUrl, QSize, QTimer
 
 from ..data.database import (
@@ -1184,44 +1185,89 @@ class FieldManualApp(QMainWindow):
                 self._run_favorite_search(dialog.query_to_run)
 
     def _format_markdown_to_html(self, text):
-        """Converts Markdown text to HTML."""
+        """Converts Markdown to HTML with theme-aware styling."""
         if not text:
             return ""
-
+        
         extensions = ['fenced_code', 'tables', 'admonition', 'toc', 'codehilite']
         
-        # 1. Convert the Markdown to an HTML body
+        # 1. Convert Markdown to HTML
         html_body = markdown.markdown(text, extensions=extensions)
 
-        # --- CSS INJECTION ---
-        # 2. Define a CSS stylesheet for tables, designed for a dark theme
-        table_css = """
+        # 2. Detect Theme (Light vs Dark)
+        # We check the generic Text color. If it's bright, we are in dark mode.
+        text_color = self.palette().color(QPalette.Text)
+        is_dark_mode = text_color.lightness() > 128
+
+        # 3. Define Colors based on Theme
+        if is_dark_mode:
+            # Dark Mode Colors
+            header_bg = "#2a2a2a"
+            header_text = "#ffffff"
+            row_bg_alt = "#2c2c2c" # Dark gray for alternating rows
+            border_color = "#555"
+            body_text = "#e0e0e0" # Explicit text color ensures readability
+            pygments_style = 'monokai'
+            code_bg = "#2a2a2a" # Background for code blocks
+            code_border = "#555"
+        else:
+            # Light Mode Colors
+            header_bg = "#e0e0e0" # Light gray header
+            header_text = "#000000"
+            row_bg_alt = "#f5f5f5" # Very light gray for alternating rows
+            border_color = "#ccc"
+            body_text = "#333333" # Explicit dark text for light mode
+            pygments_style = 'default' # Use a light-friendly code theme
+            code_bg = "#f8f8f8" # Light background for code blocks
+            code_border = "#ccc"
+
+        # 4. Generate CSS for Syntax Highlighting (Pygments)
+        formatter = HtmlFormatter(style=pygments_style, nobackground=True)
+        pygments_css = f"<style>{formatter.get_style_defs('.codehilite')}</style>"
+
+        # 5. Define CSS for Tables using the variables
+        # Note: We now explicitly set 'color' for 'th, td' to prevent contrast issues
+        table_css = f"""
         <style>
-        table { border-collapse: collapse; width: 95%; margin: 1em 0; }
-        th, td { border: 1px solid #555; padding: 8px; text-align: left; }
-        th { background-color: #2a2a2a; }
+        table {{ border-collapse: collapse; width: 95%; margin: 1em 0; }}
+        th, td {{ border: 1px solid {border_color}; padding: 8px; text-align: left; color: {body_text}; }}
+        th {{ background-color: {header_bg}; color: {header_text}; }}
         </style>
         """
         
-        # --- PYTHON-BASED STYLING ---
-        # 3. Manually add alternating row colors
+        # 6. Define CSS for Code Blocks
+        code_block_css = f"""
+        <style>
+        .codehilite {{ 
+            background-color: {code_bg}; 
+            border: 1px solid {code_border}; 
+            border-radius: 4px; 
+            padding: 10px; 
+            overflow: auto;
+        }}
+        /* Ensure pre tag doesn't add extra margins that break the block look */
+        pre {{ margin: 0; }}
+        </style>
+        """
+        
+        # 7. Manually add alternating row colors
+        # We define the replacement logic here to capture the 'row_bg_alt' variable
         def add_row_styling(match):
-            # This function is called for each row in the table body
             rows = match.group(1)
             styled_rows = []
-            # Find all 'tr' tags and loop through them with an index
             for i, row in enumerate(re.findall(r'<tr.*?>.*?</tr>', rows, re.DOTALL)):
-                if (i + 1) % 2 == 0: # If it's an even row
-                    styled_rows.append(row.replace('<tr>', '<tr style="background-color: #2c2c2c;">', 1))
+                if (i + 1) % 2 == 0:
+                    # Inject the theme-specific background color
+                    styled_rows.append(row.replace('<tr>', f'<tr style="background-color: {row_bg_alt};">', 1))
                 else:
                     styled_rows.append(row)
             return f"<tbody>{''.join(styled_rows)}</tbody>"
 
-        # Find the <tbody> section and apply our styling function to its contents
+        # Apply the row styling regex
         html_with_styled_rows = re.sub(r'<tbody>(.*?)</tbody>', add_row_styling, html_body, flags=re.DOTALL)
 
-        # 4. Prepend the CSS to the final HTML
-        return table_css + html_with_styled_rows
+        # 8. Combine everything
+        return pygments_css + table_css + code_block_css + html_with_styled_rows
 
     def _apply_zoom(self):
         """Applies the current zoom level to the application's global font."""
