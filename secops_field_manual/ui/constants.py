@@ -1,7 +1,7 @@
 # --- Application Metadata ---
 APP_AUTHOR = "Peter Michalski"
-APP_VERSION = "1.0"
-APP_RELEASE_DATE = "2025-10-04"
+APP_VERSION = "1.2"
+APP_RELEASE_DATE = "2026-09-02"
 APP_THANKS = "Thanks to 13Cubed, PySide6 community, and more."
 
 # --- Static Field Lists ---

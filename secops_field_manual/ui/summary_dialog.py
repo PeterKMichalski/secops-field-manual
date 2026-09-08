@@ -2,6 +2,7 @@ from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QFormLayout, QLabel, QDialogButtonBox, QGroupBox
 )
 from PySide6.QtCore import Qt
+from .constants import OPERATING_SYSTEMS, MITRE_ATTACK_TACTICS
 
 class SummaryDialog(QDialog):
     def __init__(self, summary_data, parent=None):
@@ -31,9 +32,10 @@ class SummaryDialog(QDialog):
         # --- OS Counts Group ---
         os_counts = summary_data.get('os_counts', {})
         if os_counts:
+            os_order = {os: i for i, os in enumerate(OPERATING_SYSTEMS)}
             os_group = QGroupBox("Entries by OS")
             form_layout_3 = QFormLayout()
-            for os, count in sorted(os_counts.items()):
+            for os, count in sorted(os_counts.items(), key=lambda x: os_order.get(x[0], 999)):
                 form_layout_3.addRow(f"{os or 'Unspecified'}:", QLabel(str(count)))
             os_group.setLayout(form_layout_3)
             main_layout.addWidget(os_group)
@@ -41,9 +43,10 @@ class SummaryDialog(QDialog):
         # --- MITRE Counts Group ---
         mitre_counts = summary_data.get('mitre_counts', {})
         if mitre_counts:
+            mitre_order = {tactic: i for i, tactic in enumerate(MITRE_ATTACK_TACTICS)}
             mitre_group = QGroupBox("Entries by MITRE Tactic")
             form_layout_4 = QFormLayout()
-            for tactic, count in sorted(mitre_counts.items()):
+            for tactic, count in sorted(mitre_counts.items(), key=lambda x: mitre_order.get(x[0], 999)):
                 form_layout_4.addRow(f"{tactic}:", QLabel(str(count)))
             mitre_group.setLayout(form_layout_4)
             main_layout.addWidget(mitre_group)

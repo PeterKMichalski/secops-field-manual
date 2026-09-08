@@ -83,7 +83,7 @@ class ManageSearchesDialog(QDialog):
             return
         
         name = selected_items[0].text()
-        self.query_to_run = self.searches.get(name)
+        self.query_to_run = name
         self.accept()
 
     def _rename_search(self):
