@@ -3,7 +3,7 @@ import re
 import shutil
 import html
 from PySide6.QtWidgets import (
-    QDialog, QFormLayout, QLineEdit, QTextEdit, QComboBox, 
+    QDialog, QFormLayout, QLineEdit, QTextEdit, QTextBrowser, QComboBox,
     QLabel, QPushButton, QDialogButtonBox, QFileDialog,
     QInputDialog, QMessageBox, QWidget, QVBoxLayout, QHBoxLayout, QListWidget, QListWidgetItem, QSizePolicy,
     QCompleter, QAbstractItemView, QGroupBox, QStyle
@@ -264,16 +264,6 @@ class EntryEditor(QDialog):
         entry_tags = get_tags_for_entry(self.db_file, self.entry_id)
         self.tag_list_widget.addItems(entry_tags)
 
-        if existing_entry[6] in OPERATING_SYSTEMS: # Note: Index changed
-            self.os_input.setCurrentText(existing_entry[6])
-            
-        existing_mitre = existing_entry[7] or "" # Note: Index changed
-        selected_mitre_list = {tag.strip() for tag in existing_mitre.split(',') if tag.strip()}
-        for i in range(self.mitre_list_widget.count()):
-            item = self.mitre_list_widget.item(i)
-            if item.text() in selected_mitre_list:
-                item.setSelected(True)
-        
         self.image_label.setText(os.path.basename(self.image_path) if self.image_path else "No image selected")
 
     def get_data(self):
@@ -395,6 +385,25 @@ class EntryEditor(QDialog):
         
         self.tag_input.clear()
 
+# --- Generic Help / Info Dialog ---
+class HelpDialog(QDialog):
+    def __init__(self, title, html_content, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setMinimumSize(560, 500)
+
+        layout = QVBoxLayout(self)
+
+        browser = QTextBrowser()
+        browser.setHtml(html_content)
+        browser.setOpenLinks(False)
+        layout.addWidget(browser)
+
+        buttons = QDialogButtonBox(QDialogButtonBox.Close)
+        buttons.rejected.connect(self.close)
+        layout.addWidget(buttons)
+
+
 # --- About Dialog ---
 class AboutDialog(QDialog):
     # Update the __init__ method to accept the new arguments
@@ -415,7 +424,7 @@ class AboutDialog(QDialog):
         <p><b>Version:</b> {version}</p>
         <p><b>Release Date:</b> {release_date}</p>
         <p><b>Thanks:</b> {thanks}</p>
-        <p>This application is designed as a "field manual" for quickly storing and retrieving forensic artifacts, technical notes and procedures.</p>
+        <p>A portable, personal knowledge base for security operations — quickly store, search, and reference forensic artifacts, technical procedures, and investigation notes.</p>
         """
         info_label = QLabel(info_text)
         info_label.setTextFormat(Qt.RichText)

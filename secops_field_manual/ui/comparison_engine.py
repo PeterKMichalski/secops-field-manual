@@ -2,7 +2,7 @@ import csv
 import os
 import sqlite3
 from datetime import datetime
-from ..data.database import insert_entry, get_all_entries_for_export
+from ..data.database import insert_entry, get_all_entries_for_export, get_mitre_order
 
 def _open_csv_with_fallback(csv_path):
     """
@@ -83,14 +83,18 @@ def perform_import(target_db_path, entries_to_add, source_filename):
                         break
                     copy_num += 1
             
+            mitre_raw = entry.get('mitre') or ''
+            mitre_normalized = get_mitre_order(mitre_raw) if mitre_raw else ''
+            mitre_val = mitre_normalized if mitre_normalized else mitre_raw
+
             success, new_id = insert_entry(
                 target_db_path, final_title,
-                entry.get('description',''), 
+                entry.get('description',''),
                 entry.get('artifact_type', 'Other'),
                 entry.get('artifact_value',''),
-                entry.get('image_path',''), 
+                entry.get('image_path',''),
                 entry.get('os',''),
-                entry.get('mitre',''), 
+                mitre_val,
                 entry.get('notes',''),
                 entry.get('resources',''),
                 [t.strip() for t in (entry.get('tags') or "").split(',') if t.strip()],
@@ -113,8 +117,11 @@ def perform_bulk_import_from_csv(target_db_path, csv_path, source_filename):
         reader = csv.DictReader(infile)
         external_entries_list = list(reader)
 
-    current_entries_list = get_all_entries_for_export(target_db_path)
-    current_entries_dict = {entry['title'].lower(): entry for entry in current_entries_list}
+    current_entries_list = get_all_entries_for_export(target_db_path) or []
+    current_entries_dict = {
+        entry['Title'].lower(): {k.lower().replace(' ', '_'): v for k, v in entry.items()}
+        for entry in current_entries_list
+    }
 
     comparison = compare_data_sources(current_entries_dict, external_entries_list)
 

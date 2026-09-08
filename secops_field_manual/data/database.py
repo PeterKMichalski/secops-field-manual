@@ -118,113 +118,138 @@ def get_mitre_order(tags_string):
 @safe_db_operation
 def search_entries(db_file, parsed_query):
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    
-    query = """
-        SELECT DISTINCT e.id, e.title
-        FROM entries e
-        LEFT JOIN entry_tags et ON e.id = et.entry_id
-        LEFT JOIN tags t ON et.tag_id = t.id
-    """
-    conditions = []
-    params = []
+    try:
+        cur = conn.cursor()
 
-    for field, values in parsed_query["filters"].items():
-        for value in values:
-            is_blank_search = value.lower() in ('blank', 'empty', 'null')
-            
-            column_map = {
-                'artifact_value': 'e.artifact_value', 
-                'artifact_type': 'e.artifact_type',
-                'description': 'e.description', 
-                'notes': 'e.notes', 
-                'resources': 'e.resources', 
-                'mitre': 'e.mitre', 
-                'os': 'e.os', 
-                'source': 'e.source'
-            }
+        query = """
+            SELECT DISTINCT e.id, e.title
+            FROM entries e
+            LEFT JOIN entry_tags et ON e.id = et.entry_id
+            LEFT JOIN tags t ON et.tag_id = t.id
+        """
+        conditions = []
+        params = []
 
-            if is_blank_search and field in column_map:
-                col = column_map[field]
-                conditions.append(f"({col} IS NULL OR {col} = '')")
-                continue
-
-            if field == "title":
-                if value.startswith('-'):
-                    title_val = value[1:].strip('"')
-                    conditions.append("e.title NOT LIKE ?")
-                    params.append(title_val)
-                else:
-                    title_val = value.strip('"')
-                    conditions.append("e.title LIKE ?")
-                    params.append(title_val)
-            elif field == "tags":
+        for field, values in parsed_query["filters"].items():
+            for value in values:
                 is_negative = value.startswith('-')
-                tag_name = value[1:] if is_negative else value
-                operator = "NOT IN" if is_negative else "IN"
-                conditions.append(f"e.id {operator} (SELECT et.entry_id FROM entry_tags et JOIN tags t ON et.tag_id = t.id WHERE t.name LIKE ?)")
-                params.append(f"%{tag_name}%")
-            elif field in column_map:
-                col = column_map[field]
-                is_negative = value.startswith('-')
-                val = value[1:] if is_negative else value
-                operator = "NOT LIKE" if is_negative else "LIKE"
-                conditions.append(f"{col} {operator} ?")
-                params.append(f"%{val}%")
-            elif field in ('added_after', 'added_before', 'modified_after', 'modified_before'):
-                date_col = 'e.added_at' if 'added' in field else 'e.content_modified_at'
-                operator = '>=' if 'after' in field else '<='
-                conditions.append(f"DATE({date_col}) {operator} ?")
-                params.append(value)
+                raw_value = value[1:] if is_negative else value
+                is_blank_search = raw_value.lower() in ('blank', 'empty', 'null')
 
-    for keyword in parsed_query["positive"]:
-        kw = f"%{keyword}%"
-        conditions.append("""
-            (e.title LIKE ? OR e.description LIKE ? OR e.artifact_type LIKE ? OR e.artifact_value LIKE ? OR e.notes LIKE ? OR e.resources LIKE ? OR e.mitre LIKE ? OR
-             e.id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON et.tag_id = t.id WHERE t.name LIKE ?))
-        """)
-        params.extend([kw, kw, kw, kw, kw, kw, kw, kw])
-        
-    for keyword in parsed_query["negative"]:
-        kw = f"%{keyword}%"
-        conditions.append("""
-            e.id NOT IN (SELECT id FROM entries WHERE title LIKE ? OR description LIKE ? OR artifact_type LIKE ? OR artifact_value LIKE ? OR notes LIKE ? OR resources LIKE ? OR mitre LIKE ?) AND 
-            e.id NOT IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON et.tag_id = t.id WHERE t.name LIKE ?)
-        """)
-        params.extend([kw, kw, kw, kw, kw, kw, kw, kw])
+                column_map = {
+                    'artifact_value': 'e.artifact_value',
+                    'artifact_type': 'e.artifact_type',
+                    'description': 'e.description',
+                    'notes': 'e.notes',
+                    'resources': 'e.resources',
+                    'mitre': 'e.mitre',
+                    'os': 'e.os',
+                    'source': 'e.source'
+                }
 
-    for phrase in parsed_query["exact"]:
-        ph = f"%{phrase}%"
-        conditions.append("(e.description LIKE ? OR e.notes LIKE ? OR e.resources LIKE ? OR e.artifact_value LIKE ?)")
-        params.extend([ph, ph, ph, ph])
-        
-    if conditions:
-        query += " WHERE " + " AND ".join(conditions)
-    
-    query += " ORDER BY e.title COLLATE NOCASE ASC"
-    
-    cur.execute(query, tuple(params))
-    results = cur.fetchall()
-    conn.close()
-    return results
+                if is_blank_search and field in column_map:
+                    col = column_map[field]
+                    if is_negative:
+                        conditions.append(f"({col} IS NOT NULL AND {col} != '')")
+                    else:
+                        conditions.append(f"({col} IS NULL OR {col} = '')")
+                    continue
+
+                if is_blank_search and field == "tags":
+                    if is_negative:
+                        conditions.append("e.id IN (SELECT DISTINCT entry_id FROM entry_tags)")
+                    else:
+                        conditions.append("e.id NOT IN (SELECT DISTINCT entry_id FROM entry_tags)")
+                    continue
+
+                if field == "title":
+                    if value.startswith('-'):
+                        title_val = value[1:].strip('"')
+                        conditions.append("e.title NOT LIKE ?")
+                        params.append(f"%{title_val}%")
+                    else:
+                        title_val = value.strip('"')
+                        conditions.append("e.title LIKE ?")
+                        params.append(f"%{title_val}%")
+                elif field == "tags":
+                    is_negative = value.startswith('-')
+                    tag_name = value[1:] if is_negative else value
+                    operator = "NOT IN" if is_negative else "IN"
+                    conditions.append(f"e.id {operator} (SELECT et.entry_id FROM entry_tags et JOIN tags t ON et.tag_id = t.id WHERE t.name LIKE ?)")
+                    params.append(f"%{tag_name}%")
+                elif field in column_map:
+                    col = column_map[field]
+                    is_negative = value.startswith('-')
+                    val = value[1:] if is_negative else value
+                    operator = "NOT LIKE" if is_negative else "LIKE"
+                    conditions.append(f"{col} {operator} ?")
+                    params.append(f"%{val}%")
+                elif field in ('added_after', 'added_before', 'modified_after', 'modified_before'):
+                    date_col = 'e.added_at' if 'added' in field else 'e.content_modified_at'
+                    operator = '>=' if 'after' in field else '<='
+                    conditions.append(f"DATE({date_col}) {operator} ?")
+                    params.append(value)
+
+        for keyword in parsed_query["positive"]:
+            kw = f"%{keyword}%"
+            conditions.append("""
+                (e.title LIKE ? OR e.description LIKE ? OR e.artifact_type LIKE ? OR e.artifact_value LIKE ? OR e.notes LIKE ? OR e.resources LIKE ? OR e.mitre LIKE ? OR
+                 e.id IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON et.tag_id = t.id WHERE t.name LIKE ?))
+            """)
+            params.extend([kw, kw, kw, kw, kw, kw, kw, kw])
+
+        for keyword in parsed_query["negative"]:
+            kw = f"%{keyword}%"
+            conditions.append("""
+                e.id NOT IN (SELECT id FROM entries WHERE title LIKE ? OR description LIKE ? OR artifact_type LIKE ? OR artifact_value LIKE ? OR notes LIKE ? OR resources LIKE ? OR mitre LIKE ?) AND
+                e.id NOT IN (SELECT et.entry_id FROM entry_tags et JOIN tags t ON et.tag_id = t.id WHERE t.name LIKE ?)
+            """)
+            params.extend([kw, kw, kw, kw, kw, kw, kw, kw])
+
+        for phrase in parsed_query["exact"]:
+            ph = f"%{phrase}%"
+            conditions.append("(e.title LIKE ? OR e.description LIKE ? OR e.notes LIKE ? OR e.resources LIKE ? OR e.artifact_value LIKE ?)")
+            params.extend([ph, ph, ph, ph, ph])
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += " ORDER BY e.title COLLATE NOCASE ASC"
+
+        cur.execute(query, tuple(params))
+        return cur.fetchall()
+    finally:
+        conn.close()
+
+@safe_db_operation
+def get_entry_count(db_file):
+    conn = sqlite3.connect(db_file)
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT COUNT(*) FROM entries")
+        return cur.fetchone()[0]
+    finally:
+        conn.close()
 
 @safe_db_operation
 def get_tags_for_entry(db_file, entry_id):
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    cur.execute("SELECT t.name FROM tags t JOIN entry_tags et ON t.id = et.tag_id WHERE et.entry_id = ?", (entry_id,))
-    tags = sorted([row[0] for row in cur.fetchall()], key=str.lower)
-    conn.close()
-    return tags
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT t.name FROM tags t JOIN entry_tags et ON t.id = et.tag_id WHERE et.entry_id = ?", (entry_id,))
+        return sorted([row[0] for row in cur.fetchall()], key=str.lower)
+    finally:
+        conn.close()
 
 @safe_db_operation
 def get_all_tags(db_file):
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    cur.execute("SELECT id, name FROM tags ORDER BY name COLLATE NOCASE")
-    all_tags = cur.fetchall()
-    conn.close()
-    return all_tags
+    try:
+        cur = conn.cursor()
+        cur.execute("SELECT id, name FROM tags ORDER BY name COLLATE NOCASE")
+        return cur.fetchall()
+    finally:
+        conn.close()
 
 def _get_or_create_tag_id(cursor, tag_name):
     cursor.execute("SELECT id FROM tags WHERE name = ?", (tag_name,))
@@ -235,7 +260,7 @@ def _get_or_create_tag_id(cursor, tag_name):
         cursor.execute("INSERT INTO tags (name) VALUES (?)", (tag_name,))
         return cursor.lastrowid
 
-safe_db_operation
+@safe_db_operation
 def get_all_entries_for_export(db_file):
     """
     Fetches all entries and their tags, formatted for CSV export.
@@ -328,71 +353,81 @@ def get_database_summary(db_file):
 @safe_db_operation
 def insert_entry(db_file, title, description, artifact_type, artifact_value, image_path, os_val, mitre_val, notes, resources, tag_list, source, content_modified_at=None):
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    final_content_modified_at = content_modified_at if content_modified_at else now
+    try:
+        cur = conn.cursor()
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+        final_content_modified_at = content_modified_at if content_modified_at else now
 
-    cur.execute("""
-        INSERT INTO entries (title, description, artifact_type, artifact_value, content_modified_at, added_at, source, image_path, os, mitre, notes, resources)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (title, description, artifact_type, artifact_value, final_content_modified_at, now, source, image_path, os_val, mitre_val, notes, resources))
-    
-    new_entry_id = cur.lastrowid
-    
-    for tag_name in tag_list:
-        tag_id = _get_or_create_tag_id(cur, tag_name)
-        cur.execute("INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)", (new_entry_id, tag_id))
-    
-    conn.commit()
-    conn.close()
-    return True, new_entry_id
+        cur.execute("""
+            INSERT INTO entries (title, description, artifact_type, artifact_value, content_modified_at, added_at, source, image_path, os, mitre, notes, resources)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """, (title, description, artifact_type, artifact_value, final_content_modified_at, now, source, image_path, os_val, mitre_val, notes, resources))
+
+        new_entry_id = cur.lastrowid
+
+        for tag_name in tag_list:
+            tag_id = _get_or_create_tag_id(cur, tag_name)
+            cur.execute("INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)", (new_entry_id, tag_id))
+
+        conn.commit()
+        return True, new_entry_id
+    finally:
+        conn.close()
 
 @safe_db_operation
 def update_entry(db_file, entry_id, title, description, artifact_type, artifact_value, image_path, os_val, mitre_val, notes, resources, tag_list):
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-    
-    cur.execute("""
-        UPDATE entries 
-        SET title=?, description=?, artifact_type=?, artifact_value=?, content_modified_at=?, image_path=?, os=?, mitre=?, notes=?, resources=? 
-        WHERE id=?
-    """, (title, description, artifact_type, artifact_value, now, image_path, os_val, mitre_val, notes, resources, entry_id))
-    
-    cur.execute("DELETE FROM entry_tags WHERE entry_id = ?", (entry_id,))
-    for tag_name in tag_list:
-        tag_id = _get_or_create_tag_id(cur, tag_name)
-        cur.execute("INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)", (entry_id, tag_id))
-    
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        now = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
+
+        cur.execute("""
+            UPDATE entries
+            SET title=?, description=?, artifact_type=?, artifact_value=?, content_modified_at=?, image_path=?, os=?, mitre=?, notes=?, resources=?
+            WHERE id=?
+        """, (title, description, artifact_type, artifact_value, now, image_path, os_val, mitre_val, notes, resources, entry_id))
+
+        cur.execute("DELETE FROM entry_tags WHERE entry_id = ?", (entry_id,))
+        for tag_name in tag_list:
+            tag_id = _get_or_create_tag_id(cur, tag_name)
+            cur.execute("INSERT OR IGNORE INTO entry_tags (entry_id, tag_id) VALUES (?, ?)", (entry_id, tag_id))
+
+        conn.commit()
+    finally:
+        conn.close()
 
 @safe_db_operation
 def delete_entry(db_file, entry_id):
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM entries WHERE id=?", (entry_id,))
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM entries WHERE id=?", (entry_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 @safe_db_operation
 def rename_tag(db_file, tag_id, new_name):
     """Renames a tag. Decorator handles IntegrityError."""
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    cur.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
-    conn.commit()
-    conn.close()
-    return True, ""
+    try:
+        cur = conn.cursor()
+        cur.execute("UPDATE tags SET name = ? WHERE id = ?", (new_name, tag_id))
+        conn.commit()
+        return True, ""
+    finally:
+        conn.close()
 
 @safe_db_operation
 def delete_tag(db_file, tag_id):
     """Deletes a tag. Decorator handles errors."""
     conn = sqlite3.connect(db_file)
-    cur = conn.cursor()
-    cur.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
-    conn.commit()
-    conn.close()
+    try:
+        cur = conn.cursor()
+        cur.execute("DELETE FROM tags WHERE id = ?", (tag_id,))
+        conn.commit()
+    finally:
+        conn.close()
 
 @safe_db_operation
 def get_all_tags_with_counts(db_path):

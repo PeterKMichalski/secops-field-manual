@@ -2,6 +2,7 @@ import sys
 import os
 import re
 import sqlite3
+import itertools
 import urllib.parse
 import traceback
 import csv
@@ -25,18 +26,18 @@ from PySide6.QtCore import Qt, QUrl, QSize, QTimer
 from ..data.database import (
     init_db, search_entries, insert_entry, update_entry, delete_entry,
     is_valid_sqlite_file, check_db_schema, get_tags_for_entry, get_database_summary,
-    get_all_entries_for_export
+    get_all_entries_for_export, get_mitre_order, get_entry_count
 )
-from .dialogs import EntryEditor, AboutDialog, CompareDBDialog 
+from .dialogs import EntryEditor, AboutDialog, CompareDBDialog, HelpDialog
 from .constants import (
     OPERATING_SYSTEMS, MITRE_ATTACK_TACTICS, DEFAULT_DB_FILENAME, 
     DEFAULT_FOLDER_NAME, APP_AUTHOR, APP_VERSION, APP_RELEASE_DATE, 
     APP_THANKS, ARTIFACT_TYPES
 )
 from .utilities import (
-    resource_path, parse_search_query, save_last_db_path, load_saved_searches, 
-    save_searches, load_search_history, record_search_in_history, 
-    save_zoom_level, load_zoom_level
+    resource_path, parse_search_query, save_last_db_path, load_saved_searches,
+    save_searches, load_search_history, record_search_in_history,
+    save_zoom_level, load_zoom_level, CONFIG_FILE
 )
 from .custom_widgets import ClickableImage, SearchLineEdit, FieldCompleter
 from .tag_management_dialog import TagManagementDialog
@@ -144,6 +145,13 @@ class FieldManualApp(QMainWindow):
         self.current_entry_id = None
         self.current_text = ""
 
+        # Non-modal info dialog instances
+        self._search_help_dialog = None
+        self._formatting_help_dialog = None
+        self._data_locations_dialog = None
+        self._summary_dialog = None
+        self._about_dialog = None
+
         # Drag and Drop Grouping Mappings
         self.field_map = {
             "OS": "os",
@@ -173,7 +181,7 @@ class FieldManualApp(QMainWindow):
         
         # 2. Define the list of fields for completion
         positive_fields = [
-            "title:", "os:", "mitre:", "tags:", "artifact_type:", "artifact_value:", "description:", "notes:", "resources:"
+            "title:", "os:", "mitre:", "tags:", "artifact_type:", "artifact_value:", "description:", "notes:", "resources:",
             "added_after:", "added_before:", "modified_after:", "modified_before:", "source:"
         ]
         negative_fields = [f"-{field}" for field in positive_fields]
@@ -476,7 +484,7 @@ class FieldManualApp(QMainWindow):
         self.active_groups_list.model().rowsRemoved.connect(self.on_grouping_changed)
 
         # --- Entries Stack ---
-        entries_group = QGroupBox("Entries")
+        self.entries_group = QGroupBox("Entries")
         entries_layout = QVBoxLayout()
         
         self.view_stack = QStackedWidget()
@@ -517,8 +525,8 @@ class FieldManualApp(QMainWindow):
         button_layout.addWidget(self.delete_button, 1, 1)
         entries_layout.addLayout(button_layout)
         
-        entries_group.setLayout(entries_layout)
-        left_layout.addWidget(entries_group)
+        self.entries_group.setLayout(entries_layout)
+        left_layout.addWidget(self.entries_group)
         
         self.add_button.clicked.connect(self.add_entry)
         self.edit_button.clicked.connect(self.edit_entry)
@@ -572,7 +580,6 @@ class FieldManualApp(QMainWindow):
         scroll_area = QScrollArea()
         scroll_area.setWidget(self.resources_area)
         scroll_area.setWidgetResizable(True)
-        scroll_area.setMaximumHeight(120)
         resources_layout.addWidget(scroll_area)
         resources_group.setLayout(resources_layout)
 
@@ -634,24 +641,28 @@ class FieldManualApp(QMainWindow):
         # Row 1: Artifact
         grid_layout.addWidget(self.artifact_group, 1, 0, 1, 4)
 
-        # Row 2: Description and Notes in a splitter
+        # Row 2: Vertical splitter containing desc/notes and resources
         desc_notes_splitter = QSplitter(Qt.Horizontal)
         desc_notes_splitter.addWidget(desc_group)
         desc_notes_splitter.addWidget(notes_group)
         desc_notes_splitter.setSizes([self.width() * 0.5, self.width() * 0.5])
-        grid_layout.addWidget(desc_notes_splitter, 2, 0, 1, 4)
 
-        # Row 3: Resources
-        grid_layout.addWidget(resources_group, 3, 0, 1, 4)
+        content_splitter = QSplitter(Qt.Vertical)
+        content_splitter.addWidget(desc_notes_splitter)
+        content_splitter.addWidget(resources_group)
+        content_splitter.setStretchFactor(0, 3)
+        content_splitter.setStretchFactor(1, 1)
+        content_splitter.setHandleWidth(12)
+        content_splitter.setChildrenCollapsible(False)
+        grid_layout.addWidget(content_splitter, 2, 0, 1, 4)
 
         # --- Configure Grid Stretching ---
         grid_layout.setColumnStretch(0, 1)
         grid_layout.setColumnStretch(1, 1)
         grid_layout.setColumnStretch(2, 1)
         grid_layout.setColumnStretch(3, 1)
-        
-        grid_layout.setRowStretch(2, 2) # Allow the splitter row to take up the most vertical space
-        grid_layout.setRowStretch(3, 1)
+
+        grid_layout.setRowStretch(2, 1)
 
 
     def _create_text_group(self, title, copy_func):
@@ -680,16 +691,21 @@ class FieldManualApp(QMainWindow):
         return group_layout
         
 
+    def _show_info_dialog(self, attr, factory):
+        """Show a non-modal info dialog, bringing it to front if already open."""
+        dialog = getattr(self, attr)
+        if dialog is None or not dialog.isVisible():
+            dialog = factory()
+            setattr(self, attr, dialog)
+        dialog.show()
+        dialog.raise_()
+        dialog.activateWindow()
+
     def about_app(self):
-        """Displays the About dialog with app info."""
-        dialog = AboutDialog(
-            APP_AUTHOR, 
-            APP_VERSION, 
-            APP_RELEASE_DATE, 
-            APP_THANKS, 
-            self
+        self._show_info_dialog(
+            '_about_dialog',
+            lambda: AboutDialog(APP_AUTHOR, APP_VERSION, APP_RELEASE_DATE, APP_THANKS, self)
         )
-        dialog.exec()
 
 
     def compare_db(self):
@@ -739,14 +755,16 @@ class FieldManualApp(QMainWindow):
 
     def search(self):
         """Performs a search based on the content of the search bar AND current grouping."""
-        # 1. Capture State before refresh (Expansion & Selection)
+        # Save before any clear() calls wipe it via currentItemChanged signal
+        entry_to_restore = self.current_entry_id
+
+        # 1. Capture expansion state before refresh
         expanded_paths = set()
         if self.view_stack.currentIndex() == 1: # Tree View
             iterator = QTreeWidgetItemIterator(self.tree_view)
             while iterator.value():
                 item = iterator.value()
                 if item.isExpanded():
-                    # Build path
                     path = []
                     t = item
                     while t:
@@ -757,10 +775,11 @@ class FieldManualApp(QMainWindow):
 
         query_text = self.search_input.text().strip()
         parsed_query = parse_search_query(query_text)
-        
+
         results = search_entries(self.db_file, parsed_query)
-        # results is a list of tuples: (id, title)
-        
+        total = get_entry_count(self.db_file)
+        self.entries_group.setTitle(f"Entries — {len(results)} of {total}")
+
         group_keys = self.get_active_grouping_keys()
 
         if not group_keys:
@@ -770,36 +789,31 @@ class FieldManualApp(QMainWindow):
             if results:
                 for r in results:
                     self.results_list.addItem(f"{r[0]}: {r[1]}")
-            # Ensure proper selection if editing/adding just happened
-            if self.current_entry_id:
-                # Try to re-select using helper
-                self._select_entry_by_id(self.current_entry_id)
+            if entry_to_restore:
+                self._select_entry_by_id(entry_to_restore)
         else:
             # --- TREE VIEW MODE ---
             self.view_stack.setCurrentIndex(1)
-            # Need to fetch full data for these results to group them
             full_entries = self._fetch_full_entries_for_grouping(results)
             self._populate_tree(full_entries, group_keys)
-            
+
             # 2. Restore Expansion State
             if expanded_paths:
                 iterator = QTreeWidgetItemIterator(self.tree_view)
                 while iterator.value():
                     item = iterator.value()
-                    # Reconstruct path for current item
                     path = []
                     t = item
                     while t:
                         path.insert(0, t.text(0))
                         t = t.parent()
-                    
                     if tuple(path) in expanded_paths:
                         item.setExpanded(True)
                     iterator += 1
 
             # 3. Restore Selection
-            if self.current_entry_id:
-                self._select_entry_by_id(self.current_entry_id)
+            if entry_to_restore:
+                self._select_entry_by_id(entry_to_restore)
 
     def _fetch_full_entries_for_grouping(self, results):
         """
@@ -835,11 +849,8 @@ class FieldManualApp(QMainWindow):
 
     def _populate_tree(self, entries, group_keys):
         self.tree_view.clear()
-
-        # Disable sorting temporarily for performance and consistent insertion
         self.tree_view.setSortingEnabled(False)
 
-        # Create lookup maps for custom sorting
         os_order = {k: i for i, k in enumerate(OPERATING_SYSTEMS)}
         mitre_order = {k: i for i, k in enumerate(MITRE_ATTACK_TACTICS)}
         type_order = {k: i for i, k in enumerate(ARTIFACT_TYPES)}
@@ -849,80 +860,97 @@ class FieldManualApp(QMainWindow):
             for field in group_keys:
                 val = entry.get(field)
                 if field == 'tags':
-                    # Tags are a list, convert to string for sorting
-                    # Note: This sorts simply by the string representation of tags.
-                    val_str = ", ".join(entry.get('tags', []))
-                    key.append((1, val_str)) # Priority 1 (after custom orders)
+                    tags = entry.get('tags', [])
+                    key.append((1, tags[0] if tags else ""))
                 elif field == 'os':
-                    # Priority 0: Defined order, Priority 1: Alphabetic (for unknown)
                     idx = os_order.get(val, 999)
-                    if idx != 999:
-                        key.append((0, idx))
-                    else:
-                        key.append((1, val if val else ""))
+                    key.append((0, idx) if idx != 999 else (1, val if val else ""))
                 elif field == 'mitre':
-                    idx = mitre_order.get(val, 999)
-                    if idx != 999:
-                        key.append((0, idx))
-                    else:
-                        key.append((1, val if val else ""))
+                    first_tactic = (val or '').split(',')[0].strip()
+                    idx = mitre_order.get(first_tactic, 999)
+                    key.append((0, idx) if idx != 999 else (1, first_tactic))
                 elif field == 'artifact_type':
                     idx = type_order.get(val, 999)
-                    if idx != 999:
-                        key.append((0, idx))
-                    else:
-                        key.append((1, val if val else ""))
+                    key.append((0, idx) if idx != 999 else (1, val if val else ""))
                 else:
                     key.append((1, val if val else ""))
-            
-            # Finally sort by title
             key.append((1, entry.get('title', '')))
             return tuple(key)
 
-        # Sort entries based on the hierarchy keys
         entries.sort(key=get_sort_key)
 
         nodes_cache = {}
 
         for entry in entries:
-            current_parent = self.tree_view.invisibleRootItem()
-            path = []
-
-            # 1. Build Folders
+            # Build value options per field; multi-value fields produce multiple branches
+            value_options = []
             for key_field in group_keys:
                 if key_field == 'tags':
-                    # Special handling for tags: Group by the *combination* of tags (string)
-                    key_val = ", ".join(entry.get('tags', []))
+                    tags = entry.get('tags', [])
+                    value_options.append(tags if tags else ['Uncategorized'])
+                elif key_field == 'mitre':
+                    mitre_val = entry.get('mitre') or ''
+                    if mitre_val.strip():
+                        raw_tactics = [t.strip() for t in mitre_val.split(',') if t.strip()]
+                        tactics = sorted(raw_tactics, key=lambda t: mitre_order.get(t, 999))
+                        value_options.append(tactics)
+                    else:
+                        value_options.append(['Uncategorized'])
                 else:
-                    key_val = entry.get(key_field)
-                
-                if not key_val:
-                    key_val = "Uncategorized"
-                
-                path.append(key_val)
-                path_tuple = tuple(path)
+                    val = entry.get(key_field) or 'Uncategorized'
+                    value_options.append([val])
 
-                if path_tuple in nodes_cache:
+            # Cartesian product: one tree path per combination of individual values
+            for path_values in itertools.product(*value_options):
+                current_parent = self.tree_view.invisibleRootItem()
+                path = []
+                for key_val in path_values:
+                    path.append(key_val)
+                    path_tuple = tuple(path)
+                    if path_tuple not in nodes_cache:
+                        new_node = QTreeWidgetItem([key_val])
+                        new_node.setData(0, Qt.UserRole, "GROUP")
+                        font = new_node.font(0)
+                        font.setBold(True)
+                        new_node.setFont(0, font)
+                        current_parent.addChild(new_node)
+                        new_node.setExpanded(False)
+                        nodes_cache[path_tuple] = new_node
                     current_parent = nodes_cache[path_tuple]
-                else:
-                    new_node = QTreeWidgetItem([key_val])
-                    new_node.setData(0, Qt.UserRole, "GROUP") # Mark as group
-                    
-                    font = new_node.font(0)
-                    font.setBold(True)
-                    new_node.setFont(0, font)
-                    
-                    current_parent.addChild(new_node)
-                    new_node.setExpanded(False) # Changed to False as requested
-                    nodes_cache[path_tuple] = new_node
-                    current_parent = new_node
 
-            # 2. Add Entry
-            entry_item = QTreeWidgetItem([entry['title']])
-            entry_item.setData(0, Qt.UserRole, entry['id']) # Store ID
-            current_parent.addChild(entry_item)
+                entry_item = QTreeWidgetItem([entry['title']])
+                entry_item.setData(0, Qt.UserRole, entry['id'])
+                current_parent.addChild(entry_item)
 
-        # Re-enable sorting is NOT done here to preserve the custom sort order we just applied.
+        # Post-sort: fix group node order (insertion order != lifecycle/alpha order)
+        orders = {'os': os_order, 'mitre': mitre_order, 'artifact_type': type_order, 'tags': {}}
+        self._sort_tree_nodes(self.tree_view.invisibleRootItem(), group_keys, 0, orders)
+
+    def _sort_tree_nodes(self, parent, group_keys, level, orders):
+        if parent.childCount() == 0:
+            return
+
+        children = []
+        while parent.childCount() > 0:
+            children.append(parent.takeChild(0))
+
+        groups = [c for c in children if c.data(0, Qt.UserRole) == "GROUP"]
+        entries = [c for c in children if c.data(0, Qt.UserRole) != "GROUP"]
+
+        if level < len(group_keys):
+            order_map = orders.get(group_keys[level], {})
+            groups.sort(key=lambda c: (
+                999 if c.text(0) == "Uncategorized" else order_map.get(c.text(0), 998),
+                c.text(0).lower()
+            ))
+
+        entries.sort(key=lambda c: c.text(0).lower())
+
+        for child in groups + entries:
+            parent.addChild(child)
+
+        for child in groups:
+            self._sort_tree_nodes(child, group_keys, level + 1, orders)
 
     def _toggle_details(self, checked):
         """Shows or hides the detailed metadata fields."""
@@ -985,7 +1013,12 @@ class FieldManualApp(QMainWindow):
             title_text = entry['title']
             modified_text = entry['content_modified_at'] if 'content_modified_at' in entry.keys() else ""
             os_text = entry['os'] if 'os' in entry.keys() else "N/A"
-            mitre_text = entry['mitre'] if 'mitre' in entry.keys() else "N/A"
+            mitre_raw = entry['mitre'] if 'mitre' in entry.keys() else ""
+            if mitre_raw:
+                ordered = get_mitre_order(mitre_raw)
+                mitre_text = ordered if ordered else mitre_raw
+            else:
+                mitre_text = "N/A"
             added_text = entry['added_at'] if 'added_at' in entry.keys() else ""
             source_text = entry['source'] if 'source' in entry.keys() else ""
             description_text = entry['description'] if 'description' in entry.keys() else ""
@@ -1322,41 +1355,18 @@ class FieldManualApp(QMainWindow):
         dialog.exec()
 
     def _show_data_locations(self):
-        """Shows the locations of configuration and data files."""
-        # 1. Config Dir (Saved Searches) - Uses the .secops_field_manual dotfile
-        config_dir = os.path.join(os.path.expanduser("~"), '.secops_field_manual')
-        saved_searches_path = os.path.join(config_dir, 'saved_searches.json')
-        
-        # 2. Log Dir - Calculates path based on OS standards
-        if sys.platform == 'darwin':
-            # macOS: ~/Library/Application Support/SecOpsFieldManual/logs
-            log_dir = os.path.join(os.path.expanduser("~"), 'Library', 'Application Support', 'SecOpsFieldManual', 'logs')
-        elif sys.platform == 'win32':
-            # Windows: %LOCALAPPDATA%\SecOpsFieldManual\logs
-            log_dir = os.path.join(os.environ.get('LOCALAPPDATA', os.path.expanduser('~')), 'SecOpsFieldManual', 'logs')
-        else:
-            # Linux/Other: Default to the config dir if not standard
-            log_dir = os.path.join(config_dir, 'logs')
-
-        log_file_path = os.path.join(log_dir, 'field_manual.log')
-        
-        msg = f"""
-        <h3>Configuration Data</h3>
-        <p>Your saved searches and preferences are stored here:</p>
-        <p><code>{config_dir}</code></p>
-        
-        <h3>Saved Searches File</h3>
-        <p>To share searches, copy this file:</p>
-        <p><code>{saved_searches_path}</code></p>
-        
-        <h3>Error Logs</h3>
+        from .error_handler import LOG_FILE_PATH
+        html = f"""
+        <h3>Configuration File</h3>
+        <p>Saved searches, preferences, and zoom level:</p>
+        <p><code>{CONFIG_FILE}</code></p>
+        <h3>Error Log</h3>
         <p>If you encounter issues, check this file:</p>
-        <p><code>{log_file_path}</code></p>
-        
+        <p><code>{LOG_FILE_PATH}</code></p>
         <h3>Current Database</h3>
         <p><code>{self.db_file}</code></p>
         """
-        QMessageBox.information(self, "Data Locations", msg)
+        self._show_info_dialog('_data_locations_dialog', lambda: HelpDialog("Data Locations", html, self))
 
     def _format_links_to_html(self, text):
         """Converts text into clickable links."""
@@ -1412,17 +1422,17 @@ class FieldManualApp(QMainWindow):
             search_query_text = f'title:"{entry_title}"'
             self.search_input.setText(search_query_text)
             self.search()
-            
-            if self.results_list.count() == 0 and self.tree_view.topLevelItemCount() == 0:
-                 QMessageBox.warning(self, "Not Found", f"The entry named '{entry_title}' could not be found.")
+
+            conn = sqlite3.connect(self.db_file)
+            cur = conn.cursor()
+            cur.execute("SELECT id FROM entries WHERE title = ?", (entry_title,))
+            row = cur.fetchone()
+            conn.close()
+
+            if row:
+                self._select_entry_by_id(row[0])
             else:
-                # If we are in list view, select first
-                if self.view_stack.currentIndex() == 0 and self.results_list.count() > 0:
-                    item = self.results_list.item(0)
-                    self.results_list.setCurrentItem(item)
-                    self.show_entry(item)
-                # If in tree view, it's harder to auto-select without walking tree. 
-                # For now, user sees results filtered by title, they can click.
+                QMessageBox.warning(self, "Not Found", f"The entry named '{entry_title}' could not be found.")
 
     def _on_search_text_changed(self, text):
         if not text:
@@ -1430,39 +1440,74 @@ class FieldManualApp(QMainWindow):
 
     def _open_summary_dialog(self):
         summary_data = get_database_summary(self.db_file)
-
         if summary_data.get('total_entries', 0) == 0:
             QMessageBox.information(self, "Database Empty", "There are no entries to summarize.")
             return
-
-        dialog = SummaryDialog(summary_data, self)
-        dialog.exec()
+        if self._summary_dialog is not None:
+            self._summary_dialog.close()
+        self._summary_dialog = SummaryDialog(summary_data, self)
+        self._summary_dialog.show()
+        self._summary_dialog.raise_()
+        self._summary_dialog.activateWindow()
 
     def _show_search_help(self):
-        help_title = "Advanced Search Syntax"
-        help_text = """
-        <p>Combine keywords and filters to create powerful queries.</p>
-        <h3>Basic Keywords:</h3> <p><code>windows persistence</code></p>
-        <h3>Exclusion (-):</h3> <p><code>registry -autoruns</code></p>
-        <h3>Exact Phrase:</h3> <p><code>"initial access"</code></p>
-        <h3>Filters:</h3>
-        <p><code>field:value</code> (e.g., <code>os:windows tags:network</code>)<br>
-        Fields: title, os, mitre, tags, artifact_type, etc.</p>
-        <h3>Empty:</h3> <p><code>artifact_value:blank</code></p>
+        html = """
+        <h3>Basic Keywords</h3>
+        <p>Space-separated terms use implicit AND:</p>
+        <p><code>windows persistence registry</code></p>
+        <h3>Exclusion</h3>
+        <p>Prefix a word with <code>-</code> to exclude it:</p>
+        <p><code>registry -autoruns</code></p>
+        <h3>Exact Phrase</h3>
+        <p>Wrap in double quotes:</p>
+        <p><code>"initial access"</code></p>
+        <h3>Field Filters</h3>
+        <p>Use <code>field:value</code> to target a specific field:</p>
+        <p><code>title:</code> &nbsp; <code>os:</code> &nbsp; <code>mitre:</code> &nbsp; <code>tags:</code> &nbsp;
+        <code>artifact_type:</code> &nbsp; <code>artifact_value:</code> &nbsp; <code>description:</code> &nbsp;
+        <code>notes:</code> &nbsp; <code>resources:</code> &nbsp; <code>source:</code></p>
+        <p>Example: &nbsp; <code>os:windows tags:persistence -mitre:execution</code></p>
+        <h3>Negative Field Filters</h3>
+        <p>Prefix a field filter with <code>-</code> to exclude matches:</p>
+        <p><code>-os:linux</code> &nbsp; <code>-tags:network</code></p>
+        <h3>Blank Field Search</h3>
+        <p>Find entries where a field is empty:</p>
+        <p><code>artifact_value:blank</code> &nbsp; <code>description:blank</code></p>
+        <h3>Date Filters</h3>
+        <p>Use ISO format (YYYY-MM-DD):</p>
+        <p><code>added_after:2024-01-01</code> &nbsp; <code>added_before:2025-01-01</code><br>
+        <code>modified_after:2024-06-01</code> &nbsp; <code>modified_before:2025-01-01</code></p>
+        <h3>Tip</h3>
+        <p>Press the Right Arrow key to accept an autocomplete suggestion in the search bar.</p>
         """
-        QMessageBox.information(self, help_title, help_text)
+        self._show_info_dialog('_search_help_dialog', lambda: HelpDialog("Search Syntax Help", html, self))
 
     def _show_entry_editor_help(self):
-        title = "Formatting Help"
-        text = """
-        <p><b>Notes, Description, Resources</b> support Markdown:</p>
-        <hr>
-        <b>Bold:</b> <code>**text**</code><br>
-        <b>Italic:</b> <code>*text*</code><br>
-        <b>Link:</b> <code>[[Entry Title]]</code><br>
-        <b>External:</b> <code>[Text](url)</code>
+        html = """
+        <h3>Supported Fields</h3>
+        <p>Description and Notes support full Markdown. Resources supports link syntax only.</p>
+        <h3>Text Formatting</h3>
+        <p><code>**bold**</code> &rarr; <b>bold</b> &nbsp;&nbsp; <code>*italic*</code> &rarr; <i>italic</i></p>
+        <h3>Headers</h3>
+        <p><code># Heading 1</code> &nbsp; <code>## Heading 2</code> &nbsp; <code>### Heading 3</code></p>
+        <h3>Lists</h3>
+        <p>Bullet: start a line with <code>-</code> or <code>*</code><br>
+        Numbered: start a line with <code>1.</code> <code>2.</code> etc.</p>
+        <h3>Code</h3>
+        <p>Inline: wrap in backticks &nbsp; <code>`command here`</code><br>
+        Block: wrap lines in triple backticks</p>
+        <h3>Tables</h3>
+        <pre>| Col A  | Col B  |
+|--------|--------|
+| value  | value  |</pre>
+        <h3>Links</h3>
+        <p><code>[[Entry Title]]</code> &mdash; links to another entry in this database<br>
+        <code>[Display Text](url.com)</code> &mdash; external link (use in Resources field)</p>
+        <h3>Placeholders (Artifact Value)</h3>
+        <p>Use <code>{{VARIABLE}}</code> in artifact values. Placeholders are highlighted orange.<br>
+        Double-click one to replace it &mdash; the updated value is auto-copied to clipboard.</p>
         """
-        QMessageBox.information(self, title, text)
+        self._show_info_dialog('_formatting_help_dialog', lambda: HelpDialog("Formatting Help", html, self))
 
     def _open_import_dialog(self):
         dialog = ImportDialog(self, self)
@@ -1470,10 +1515,6 @@ class FieldManualApp(QMainWindow):
         self.search() 
 
     def _export_to_csv(self):
-        if self.results_list.count() == 0 and self.tree_view.topLevelItemCount() == 0:
-            QMessageBox.information(self, "Empty", "No entries to export.")
-            return
-
         default_dir = os.path.join(os.path.expanduser("~"), 'Documents', DEFAULT_FOLDER_NAME)
         file_path, _ = QFileDialog.getSaveFileName(self, "Export to CSV", default_dir, "CSV Files (*.csv)")
 
@@ -1602,11 +1643,11 @@ class FieldManualApp(QMainWindow):
         
         code_block_css = f"""
         <style>
-        .codehilite {{ 
-            background-color: {code_bg}; 
-            border: 1px solid {code_border}; 
-            border-radius: 4px; 
-            padding: 10px; 
+        .codehilite {{
+            background-color: {code_bg};
+            border: 1px solid {code_border};
+            border-radius: 4px;
+            padding: 10px;
             overflow: auto;
         }}
         pre {{ margin: 0; }}
